@@ -5,41 +5,64 @@
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover">
 <title>みんなでアクションMMO</title>
 <style>
-  :root { --bg:#14202b; --panel:rgba(10,18,26,.82); --text:#eef3f7; --accent:#ffb347; }
+  :root { --bg:#14202b; --panel:rgba(10,18,26,.88); --text:#eef3f7; --accent:#ffb347; }
   * { box-sizing: border-box; }
   html, body { margin:0; height:100%; background:var(--bg); color:var(--text);
     font-family:"Hiragino Sans","Noto Sans JP",sans-serif; overflow:hidden; touch-action:none; }
   canvas { display:block; width:100%; height:100%; }
-  #login { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:var(--bg); z-index:10; padding:16px; }
-  #login .box { width:100%; max-width:340px; display:grid; gap:14px; }
-  #login h1 { margin:0; font-size:26px; }
-  input[type=text] { width:100%; padding:12px; font-size:16px; border-radius:8px; border:2px solid #34495c; background:#0d1620; color:var(--text); }
-  input[type=text]:focus-visible, button:focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
+  #login { position:fixed; inset:0; display:flex; align-items:center; justify-content:center; background:var(--bg); z-index:10; padding:16px; overflow-y:auto; }
+  #login .box { width:100%; max-width:340px; display:grid; gap:12px; }
+  #login h1 { margin:0; font-size:24px; }
+  label.f { display:grid; gap:4px; font-size:13px; color:#9fb3c4; }
+  input[type=text], select { width:100%; padding:12px; font-size:16px; border-radius:8px; border:2px solid #34495c; background:#0d1620; color:var(--text); }
+  :focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
   button { padding:12px; font-size:16px; border:0; border-radius:8px; background:var(--accent); color:#1b1204; font-weight:700; }
+  button:disabled { opacity:.35; }
   .colors { display:flex; gap:10px; }
   .colors label { flex:1; }
   .colors input { display:none; }
-  .colors span { display:block; height:40px; border-radius:8px; border:3px solid transparent; }
+  .colors span { display:block; height:36px; border-radius:8px; border:3px solid transparent; }
   .colors input:checked + span { border-color:#fff; }
-  #chat { position:fixed; left:8px; top:calc(8px + env(safe-area-inset-top,0px)); width:min(320px, 70vw); z-index:5; }
-  #log { max-height:30vh; overflow-y:auto; background:var(--panel); border-radius:8px; padding:6px 8px; font-size:13px; line-height:1.5; }
+  #chat { position:fixed; left:8px; top:calc(8px + env(safe-area-inset-top,0px)); width:min(300px, 60vw); z-index:5; }
+  #log { max-height:26vh; overflow-y:auto; background:var(--panel); border-radius:8px; padding:6px 8px; font-size:13px; line-height:1.5; }
   #log div { word-break:break-all; }
   #log .sys { color:#9fb3c4; }
-  #log b { color:var(--accent); font-weight:700; }
+  #log b { color:var(--accent); }
   #chatForm { display:flex; gap:6px; margin-top:6px; }
   #chatForm input { flex:1; padding:8px; font-size:14px; }
   #chatForm button { padding:8px 12px; font-size:14px; }
+  #hud { position:fixed; right:8px; top:calc(8px + env(safe-area-inset-top,0px)); z-index:5; background:var(--panel); border-radius:8px; padding:8px 10px; font-size:13px; line-height:1.6; min-width:140px; }
+  #bar { height:6px; background:#34495c; border-radius:3px; margin-top:4px; }
+  #bar i { display:block; height:100%; background:var(--accent); border-radius:3px; }
   #stick { position:fixed; left:calc(24px + env(safe-area-inset-left,0px)); bottom:calc(24px + env(safe-area-inset-bottom,0px)); width:120px; height:120px; border-radius:50%;
     background:rgba(255,255,255,.12); border:2px solid rgba(255,255,255,.3); display:none; }
   #knob { position:absolute; left:40px; top:40px; width:40px; height:40px; border-radius:50%; background:rgba(255,255,255,.7); }
   @media (pointer:coarse) { #stick { display:block; } }
+  #btns { position:fixed; right:calc(16px + env(safe-area-inset-right,0px)); bottom:calc(24px + env(safe-area-inset-bottom,0px)); z-index:5; display:grid; gap:10px; justify-items:end; }
+  #atkBtn { width:84px; height:84px; border-radius:50%; font-size:18px; }
+  #menuBtn { padding:10px 16px; background:#34495c; color:var(--text); }
+  #menu { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:8; display:flex; align-items:center; justify-content:center; padding:16px; }
+  #menu[hidden] { display:none; }
+  #menu .card { background:#16232f; border-radius:12px; padding:16px; width:100%; max-width:360px; max-height:90vh; overflow-y:auto; display:grid; gap:12px; }
+  #menu h2 { margin:0; font-size:18px; }
+  .row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .row small { color:#9fb3c4; display:block; }
+  .row button { padding:8px 14px; font-size:15px; }
 </style>
 </head>
 <body>
 <div id="login">
   <div class="box">
     <h1>みんなでアクションMMO</h1>
-    <input id="nameIn" type="text" maxlength="12" placeholder="キャラの名前" aria-label="キャラの名前">
+    <label class="f">名前<input id="nameIn" type="text" maxlength="12" placeholder="キャラの名前"></label>
+    <label class="f">種族
+      <select id="raceIn">
+        <option>人間</option><option>エルフ</option><option>ドワーフ</option><option>獣人</option>
+      </select>
+    </label>
+    <label class="f">職業
+      <select id="jobIn"><option>盗賊</option><option>戦士</option><option>魔法使い</option></select>
+    </label>
     <div class="colors" role="radiogroup" aria-label="キャラの色">
       <label><input type="radio" name="c" value="#4aa3ff" checked><span style="background:#4aa3ff"></span></label>
       <label><input type="radio" name="c" value="#ff6b6b"><span style="background:#ff6b6b"></span></label>
@@ -54,18 +77,26 @@
 <div id="chat" hidden>
   <div id="log"></div>
   <form id="chatForm">
-    <input id="chatIn" type="text" maxlength="100" placeholder="メッセージ" aria-label="メッセージ" autocomplete="off">
+    <input id="chatIn" type="text" maxlength="100" placeholder="メッセージ" autocomplete="off">
     <button>送信</button>
   </form>
 </div>
+<div id="hud" hidden></div>
 <div id="stick"><div id="knob"></div></div>
+<div id="btns" hidden>
+  <button id="menuBtn">メニュー</button>
+  <button id="atkBtn">攻撃</button>
+</div>
+<div id="menu" hidden><div class="card" id="menuCard"></div></div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
-const cv = document.getElementById('cv'), ctx = cv.getContext('2d');
-let socket, me = null, world = { W:1600, H:1200 }, players = [];
-const bubbles = {};
-const smooth = {};
+const $ = id => document.getElementById(id);
+const cv = $('cv'), ctx = cv.getContext('2d');
+let socket, me = null, world = { W:1600, H:1200, EVO_LV:[0,5,10], chains:{} };
+let players = [], monsters = [];
+const bubbles = {}, smooth = {}, swing = {};
+let menuKey = '';
 
 function resize() {
   const r = devicePixelRatio || 1;
@@ -74,55 +105,100 @@ function resize() {
 }
 addEventListener('resize', resize); resize();
 
-document.getElementById('go').onclick = () => {
-  const name = document.getElementById('nameIn').value.trim();
-  if (!name) { document.getElementById('nameIn').focus(); return; }
-  const color = document.querySelector('input[name=c]:checked').value;
+$('go').onclick = () => {
+  const name = $('nameIn').value.trim();
+  if (!name) { $('nameIn').focus(); return; }
   socket = io();
   socket.on('init', d => { me = d.id; world = d; });
-  socket.on('state', s => { players = s; });
-  socket.on('chat', m => {
-    addLog(m.name, m.text);
-    bubbles[m.id] = { text: m.text, until: Date.now() + 4000 };
-  });
+  socket.on('state', s => { players = s.players; monsters = s.monsters; updateUI(); });
+  socket.on('chat', m => { addLog(m.name, m.text); bubbles[m.id] = { text:m.text, until:Date.now()+4000 }; });
   socket.on('system', t => addLog(null, t));
-  socket.emit('join', { name, color });
-  document.getElementById('login').style.display = 'none';
-  document.getElementById('chat').hidden = false;
+  socket.on('atk', a => { swing[a.id] = Date.now() + 150; });
+  socket.emit('join', { name, color: document.querySelector('input[name=c]:checked').value, race: $('raceIn').value, job: $('jobIn').value });
+  $('login').style.display = 'none';
+  $('chat').hidden = false; $('hud').hidden = false; $('btns').hidden = false;
   requestAnimationFrame(loop);
 };
 
 function addLog(name, text) {
-  const log = document.getElementById('log');
   const row = document.createElement('div');
   if (name) { const b = document.createElement('b'); b.textContent = name + ': '; row.append(b, text); }
   else { row.className = 'sys'; row.textContent = text; }
-  log.appendChild(row);
-  while (log.children.length > 50) log.removeChild(log.firstChild);
-  log.scrollTop = log.scrollHeight;
+  $('log').appendChild(row);
+  while ($('log').children.length > 50) $('log').removeChild($('log').firstChild);
+  $('log').scrollTop = $('log').scrollHeight;
 }
-
-document.getElementById('chatForm').onsubmit = e => {
+$('chatForm').onsubmit = e => {
   e.preventDefault();
-  const i = document.getElementById('chatIn');
-  if (i.value.trim()) socket.emit('chat', i.value);
-  i.value = '';
+  if ($('chatIn').value.trim()) socket.emit('chat', $('chatIn').value);
+  $('chatIn').value = '';
 };
 
-const keys = {}; let stickV = { x:0, y:0 }, last = '';
+const jobName = p => (world.chains[p.job] || [p.job])[p.stage];
+const mine = () => players.find(p => p.id === me);
+
+function updateUI() {
+  const p = mine(); if (!p) return;
+  const need = p.lv * 30;
+  $('hud').innerHTML = '';
+  const t = document.createElement('div');
+  t.textContent = p.name + ' / ' + p.race + ' ' + jobName(p) + ' Lv' + p.lv;
+  const g = document.createElement('div');
+  g.textContent = 'ゴールド ' + p.gold + ' / SP ' + p.sp;
+  const bar = document.createElement('div'); bar.id = 'bar';
+  const i = document.createElement('i'); i.style.width = Math.min(100, p.exp / need * 100) + '%';
+  bar.appendChild(i);
+  $('hud').append(t, g, bar);
+  const key = [p.lv, p.sp, p.stage, p.sk.power, p.sk.speed, p.sk.wisdom].join();
+  if (!$('menu').hidden && key !== menuKey) renderMenu();
+}
+
+const SK = [['power','パワー','攻撃力が上がる'], ['speed','スピード','移動が速くなる'], ['wisdom','かしこさ','経験値が増える']];
+function renderMenu() {
+  const p = mine(); if (!p) return;
+  menuKey = [p.lv, p.sp, p.stage, p.sk.power, p.sk.speed, p.sk.wisdom].join();
+  const c = $('menuCard'); c.innerHTML = '';
+  const h = document.createElement('h2'); h.textContent = p.race + ' ' + jobName(p) + ' Lv' + p.lv; c.appendChild(h);
+  const sp = document.createElement('div'); sp.textContent = '使えるSP: ' + p.sp; c.appendChild(sp);
+  for (const [k, n, d] of SK) {
+    const r = document.createElement('div'); r.className = 'row';
+    const l = document.createElement('div'); l.textContent = n + ' ' + p.sk[k] + '/5';
+    const s = document.createElement('small'); s.textContent = d; l.appendChild(s);
+    const b = document.createElement('button'); b.textContent = '+';
+    b.disabled = p.sp < 1 || p.sk[k] >= 5;
+    b.onclick = () => socket.emit('skill', k);
+    r.append(l, b); c.appendChild(r);
+  }
+  const chain = world.chains[p.job] || [];
+  const r = document.createElement('div'); r.className = 'row';
+  const l = document.createElement('div');
+  if (p.stage >= 2) l.textContent = '最終形態です';
+  else { l.textContent = '進化: ' + chain[p.stage + 1]; const s = document.createElement('small'); s.textContent = 'Lv' + world.EVO_LV[p.stage + 1] + ' で進化できる'; l.appendChild(s); }
+  const b = document.createElement('button'); b.textContent = '進化';
+  b.disabled = p.stage >= 2 || p.lv < world.EVO_LV[p.stage + 1];
+  b.onclick = () => socket.emit('evolve');
+  r.append(l, b); c.appendChild(r);
+  const x = document.createElement('button'); x.textContent = '閉じる';
+  x.onclick = () => { $('menu').hidden = true; };
+  c.appendChild(x);
+}
+$('menuBtn').onclick = () => { $('menu').hidden = false; renderMenu(); };
+$('atkBtn').addEventListener('touchstart', e => { e.preventDefault(); socket.emit('attack'); }, { passive:false });
+$('atkBtn').onclick = () => socket.emit('attack');
+
+const keys = {}; let stickV = { x:0, y:0 }, lastIn = '';
 addEventListener('keydown', e => {
   if (document.activeElement.tagName === 'INPUT') return;
   keys[e.key.toLowerCase()] = true;
+  if (e.key === ' ') socket.emit('attack');
 });
 addEventListener('keyup', e => { keys[e.key.toLowerCase()] = false; });
-
-const stick = document.getElementById('stick'), knob = document.getElementById('knob');
+const stick = $('stick'), knob = $('knob');
 function moveStick(t) {
   const r = stick.getBoundingClientRect();
   let x = (t.clientX - (r.left + r.width/2)) / 50, y = (t.clientY - (r.top + r.height/2)) / 50;
   const l = Math.hypot(x, y); if (l > 1) { x /= l; y /= l; }
-  stickV = { x, y };
-  knob.style.left = (40 + x*40) + 'px'; knob.style.top = (40 + y*40) + 'px';
+  stickV = { x, y }; knob.style.left = (40 + x*40) + 'px'; knob.style.top = (40 + y*40) + 'px';
 }
 stick.addEventListener('touchstart', e => { e.preventDefault(); moveStick(e.touches[0]); }, { passive:false });
 stick.addEventListener('touchmove', e => { e.preventDefault(); moveStick(e.touches[0]); }, { passive:false });
@@ -136,19 +212,19 @@ function sendInput() {
   if (keys['w'] || keys['arrowup']) dy -= 1;
   if (keys['s'] || keys['arrowdown']) dy += 1;
   const k = dx.toFixed(2) + ',' + dy.toFixed(2);
-  if (k !== last) { last = k; socket.emit('input', { dx, dy }); }
+  if (k !== lastIn) { lastIn = k; socket.emit('input', { dx, dy }); }
 }
 
 function loop() {
   sendInput();
-  const vw = innerWidth, vh = innerHeight;
+  const vw = innerWidth, vh = innerHeight, now = Date.now();
   for (const p of players) {
     const s = smooth[p.id] || (smooth[p.id] = { x:p.x, y:p.y });
     s.x += (p.x - s.x) * 0.3; s.y += (p.y - s.y) * 0.3;
   }
-  const mine = smooth[me] || { x:world.W/2, y:world.H/2 };
-  const cx = Math.max(0, Math.min(world.W - vw, mine.x - vw/2));
-  const cy = Math.max(0, Math.min(world.H - vh, mine.y - vh/2));
+  const m0 = smooth[me] || { x:world.W/2, y:world.H/2 };
+  const cx = Math.max(0, Math.min(world.W - vw, m0.x - vw/2));
+  const cy = Math.max(0, Math.min(world.H - vh, m0.y - vh/2));
   ctx.fillStyle = '#1d3a2b'; ctx.fillRect(0, 0, vw, vh);
   ctx.save(); ctx.translate(-cx, -cy);
   ctx.strokeStyle = 'rgba(255,255,255,.07)'; ctx.lineWidth = 1;
@@ -156,18 +232,28 @@ function loop() {
   for (let y = 0; y <= world.H; y += 80) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(world.W,y); ctx.stroke(); }
   ctx.strokeStyle = '#e8d9a8'; ctx.lineWidth = 4; ctx.strokeRect(0, 0, world.W, world.H);
   ctx.textAlign = 'center';
+  for (const m of monsters) {
+    if (m.hp <= 0) continue;
+    ctx.fillStyle = '#7ad67a'; ctx.beginPath(); ctx.ellipse(m.x, m.y, 18, 14, 0, 0, 7); ctx.fill();
+    ctx.fillStyle = '#143'; ctx.fillRect(m.x-7, m.y-4, 3, 3); ctx.fillRect(m.x+4, m.y-4, 3, 3);
+    ctx.fillStyle = '#400'; ctx.fillRect(m.x-18, m.y-24, 36, 4);
+    ctx.fillStyle = '#e44'; ctx.fillRect(m.x-18, m.y-24, 36 * m.hp / m.max, 4);
+  }
   for (const p of players) {
     const s = smooth[p.id];
+    if (swing[p.id] > now) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(s.x, s.y, 70, 0, 7); ctx.stroke(); }
     ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(s.x, s.y+14, 16, 6, 0, 0, 7); ctx.fill();
     ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(s.x, s.y, 16, 0, 7); ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = p.id === me ? '#fff' : 'rgba(0,0,0,.5)'; ctx.stroke();
-    ctx.fillStyle = '#fff'; ctx.font = '13px sans-serif'; ctx.fillText(p.name, s.x, s.y - 26);
+    ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif';
+    ctx.fillText(p.name + ' Lv' + p.lv, s.x, s.y - 36);
+    ctx.fillStyle = '#ffd98a'; ctx.fillText(p.race + ' ' + jobName(p), s.x, s.y - 24);
     const b = bubbles[p.id];
-    if (b && b.until > Date.now()) {
+    if (b && b.until > now) {
       ctx.font = '13px sans-serif';
       const w = ctx.measureText(b.text).width + 16;
-      ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.fillRect(s.x - w/2, s.y - 62, w, 22);
-      ctx.fillStyle = '#111'; ctx.fillText(b.text, s.x, s.y - 46);
+      ctx.fillStyle = 'rgba(255,255,255,.95)'; ctx.fillRect(s.x - w/2, s.y - 70, w, 22);
+      ctx.fillStyle = '#111'; ctx.fillText(b.text, s.x, s.y - 54);
     }
   }
   ctx.restore();
