@@ -41,12 +41,12 @@
   @media (pointer:coarse) { #stick { display:block; } }
   #btns { position:fixed; right:calc(16px + env(safe-area-inset-right,0px)); bottom:calc(24px + env(safe-area-inset-bottom,0px)); z-index:5; display:grid; gap:10px; justify-items:end; }
   #atkBtn { width:84px; height:84px; border-radius:50%; font-size:18px; }
-  #menuBtn, #autoBtn { padding:10px 16px; background:#34495c; color:var(--text); }
+  #menuBtn, #autoBtn, #shopBtn { padding:10px 16px; background:#34495c; color:var(--text); }
   #autoBtn.on { background:var(--accent); color:#1b1204; }
-  #menu { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:8; display:flex; align-items:center; justify-content:center; padding:16px; }
-  #menu[hidden] { display:none; }
-  #menu .card { background:#16232f; border-radius:12px; padding:16px; width:100%; max-width:380px; max-height:90vh; overflow-y:auto; display:grid; gap:12px; }
-  #menu h2 { margin:0; font-size:18px; }
+  #menu, #shop { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:8; display:flex; align-items:center; justify-content:center; padding:16px; }
+  #menu[hidden], #shop[hidden] { display:none; }
+  #menu .card, #shop .card { background:#16232f; border-radius:12px; padding:16px; width:100%; max-width:380px; max-height:90vh; overflow-y:auto; display:grid; gap:12px; }
+  #menu h2, #shop h2 { margin:0; font-size:18px; }
   .row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
   .row.locked { opacity:.55; }
   .row.child { margin-left:18px; border-left:3px solid #34495c; padding-left:10px; }
@@ -89,10 +89,12 @@
 <div id="stick"><div id="knob"></div></div>
 <div id="btns" hidden>
   <button id="menuBtn">メニュー</button>
+  <button id="shopBtn">ショップ</button>
   <button id="autoBtn">オート: OFF</button>
   <button id="atkBtn">攻撃</button>
 </div>
 <div id="menu" hidden><div class="card" id="menuCard"></div></div>
+<div id="shop" hidden><div class="card" id="shopCard"></div></div>
 
 <script src="/socket.io/socket.io.js"></script>
 <script>
@@ -130,7 +132,8 @@ $('go').onclick = () => {
 function start(join) {
   socket = io();
   socket.on('init', d => { me = d.id; world = d; });
-  socket.on('save', s => writeSave(s));
+  socket.on('save', s => { writeSave(s); myData = s; if (!$('shop').hidden && shopTab !== 'craft') renderShop(); });
+  socket.on('wart', a => { arts[a.id] = makeArt(a.pix); });
   socket.on('state', s => { players = s.players; monsters = s.monsters; updateUI(); });
   socket.on('chat', m => { addLog(m.name, m.text); bubbles[m.id] = { text:m.text, until:Date.now()+4000 }; });
   socket.on('system', t => addLog(null, t));
@@ -165,7 +168,7 @@ function updateUI() {
   const t = document.createElement('div');
   t.textContent = p.name + ' / ' + p.race + ' ' + jobName(p) + ' Lv' + p.lv;
   const g = document.createElement('div');
-  g.textContent = 'ゴールド ' + p.gold + ' / SP ' + p.sp;
+  g.textContent = 'HP ' + p.hp + '/' + p.mhp + ' / ゴールド ' + p.gold + ' / SP ' + p.sp;
   const bar = document.createElement('div'); bar.id = 'bar';
   const i = document.createElement('i'); i.style.width = Math.min(100, p.exp / (p.lv * 30) * 100) + '%';
   bar.appendChild(i);
@@ -209,6 +212,114 @@ function renderMenu() {
   x.onclick = () => { $('menu').hidden = true; };
   c.appendChild(x);
 }
+
+// ---- ショップ・武器・お絵かき ----
+let myData = null, shopTab = 'shop', ed = new Array(256).fill(0), col = 1;
+const arts = {};
+const PAL = ['', '#111111', '#ffffff', '#9aa0a6', '#8b5a2b', '#d2a679', '#e53935', '#fb8c00', '#fdd835', '#43a047', '#1e88e5', '#8e24aa', '#ff80ab', '#00bcd4', '#5d4037', '#ffd700'];
+const el = (t, x) => { const e = document.createElement(t); if (x != null) e.textContent = x; return e; };
+
+function makeArt(pix) {
+  const c = document.createElement('canvas'); c.width = c.height = 16;
+  const g = c.getContext('2d');
+  for (let i = 0; i < 256; i++) {
+    const v = parseInt(pix[i], 16); if (!v) continue;
+    g.fillStyle = PAL[v]; g.fillRect(i % 16, Math.floor(i / 16), 1, 1);
+  }
+  return c;
+}
+function drawEd(c) {
+  const g = c.getContext('2d');
+  g.fillStyle = '#e9eef2'; g.fillRect(0, 0, 256, 256);
+  for (let i = 0; i < 256; i++) {
+    const x = (i % 16) * 16, y = Math.floor(i / 16) * 16;
+    if (ed[i]) { g.fillStyle = PAL[ed[i]]; g.fillRect(x, y, 16, 16); }
+    g.strokeStyle = 'rgba(0,0,0,.12)'; g.strokeRect(x + .5, y + .5, 15, 15);
+  }
+}
+function renderShop() {
+  const d = myData; if (!d) return;
+  const c = $('shopCard'); c.innerHTML = '';
+  c.appendChild(el('h2', 'ショップ'));
+  c.appendChild(el('div', 'ゴールド: ' + d.gold + ' / もっている武器: ' + d.weapons.length + '/20'));
+  const tabs = el('div'); tabs.style.cssText = 'display:flex;gap:6px';
+  [['shop', 'ぶきや'], ['inv', 'もちもの'], ['craft', 'じさく']].forEach(([k, n]) => {
+    const b = el('button', n); b.style.cssText = 'flex:1;padding:8px;font-size:14px';
+    if (shopTab !== k) b.className = 'sub';
+    b.onclick = () => { shopTab = k; renderShop(); };
+    tabs.appendChild(b);
+  });
+  c.appendChild(tabs);
+  const has = id => d.weapons.some(w => w.id === id);
+  if (shopTab === 'shop') {
+    for (const w of world.SHOP || []) {
+      const r = el('div'); r.className = 'row';
+      const l = el('div', w.name); l.appendChild(el('small', '攻撃力 +' + w.atk));
+      const b = el('button', has(w.id) ? 'もっている' : w.price + 'G で買う');
+      b.disabled = has(w.id) || d.gold < w.price || d.weapons.length >= 20;
+      b.onclick = () => socket.emit('buy', w.id);
+      r.append(l, b); c.appendChild(r);
+    }
+  } else if (shopTab === 'inv') {
+    const r0 = el('div'); r0.className = 'row';
+    const b0 = el('button', d.eq ? 'はずす' : 'そうびなし'); b0.disabled = !d.eq;
+    b0.onclick = () => socket.emit('equip', null);
+    r0.append(el('div', '素手'), b0); c.appendChild(r0);
+    for (const w of d.weapons) {
+      const r = el('div'); r.className = 'row';
+      const l = el('div', w.name); l.appendChild(el('small', '攻撃力 +' + w.atk));
+      if (w.pix) { const a = makeArt(w.pix); a.style.cssText = 'width:32px;image-rendering:pixelated;display:block;margin-bottom:4px'; l.prepend(a); }
+      const b = el('button', d.eq === w.id ? 'そうびちゅう' : 'そうびする'); b.disabled = d.eq === w.id;
+      b.onclick = () => socket.emit('equip', w.id);
+      r.append(l, b); c.appendChild(r);
+    }
+  } else {
+    c.appendChild(el('div', '16×16のドットで、自分の武器を描けます。'));
+    const cv2 = document.createElement('canvas'); cv2.width = cv2.height = 256;
+    cv2.style.cssText = 'width:100%;max-width:256px;touch-action:none;border-radius:6px;justify-self:center';
+    drawEd(cv2);
+    let down = false;
+    const paint = e => {
+      const r = cv2.getBoundingClientRect();
+      const x = Math.floor((e.clientX - r.left) / r.width * 16), y = Math.floor((e.clientY - r.top) / r.height * 16);
+      if (x < 0 || y < 0 || x > 15 || y > 15) return;
+      ed[y * 16 + x] = col; drawEd(cv2);
+    };
+    cv2.onpointerdown = e => { down = true; cv2.setPointerCapture(e.pointerId); paint(e); };
+    cv2.onpointermove = e => { if (down) paint(e); };
+    cv2.onpointerup = () => { down = false; };
+    c.appendChild(cv2);
+    const pal = el('div'); pal.style.cssText = 'display:flex;flex-wrap:wrap;gap:6px;justify-content:center';
+    for (let i = 0; i < 16; i++) {
+      const b = el('button', i ? '' : '消す'); b.style.cssText = 'width:34px;height:34px;padding:0;font-size:11px;border:3px solid ' + (col === i ? '#fff' : 'transparent') + ';background:' + (PAL[i] || '#34495c') + ';color:#fff';
+      b.onclick = () => { col = i; [...pal.children].forEach((x, j) => { x.style.borderColor = j === i ? '#fff' : 'transparent'; }); };
+      pal.appendChild(b);
+    }
+    c.appendChild(pal);
+    const clr = el('button', '全部消す'); clr.className = 'sub';
+    clr.onclick = () => { ed.fill(0); drawEd(cv2); };
+    c.appendChild(clr);
+    const nm = el('input'); nm.type = 'text'; nm.maxLength = 10; nm.placeholder = '武器の名前';
+    c.appendChild(nm);
+    const sel = el('select');
+    (world.TIERS || []).forEach((t, i) => { const o = el('option', t.price + 'G(攻撃力 +' + t.atk + ')'); o.value = i; sel.appendChild(o); });
+    c.appendChild(sel);
+    const mk = el('button', 'つくる');
+    mk.onclick = () => {
+      const t = world.TIERS[sel.value];
+      if (ed.every(v => !v)) { alert('先に絵を描いてください'); return; }
+      if (d.gold < t.price) { alert('ゴールドが足りません'); return; }
+      if (d.weapons.length >= 20) { alert('武器がいっぱいです'); return; }
+      socket.emit('craft', { name: nm.value, tier: Number(sel.value), pix: ed.map(v => v.toString(16)).join('') });
+      shopTab = 'inv'; setTimeout(renderShop, 300);
+    };
+    c.appendChild(mk);
+  }
+  const x = el('button', '閉じる'); x.onclick = () => { $('shop').hidden = true; };
+  c.appendChild(x);
+}
+$('shopBtn').onclick = () => { $('shop').hidden = false; renderShop(); };
+
 $('menuBtn').onclick = () => { $('menu').hidden = false; renderMenu(); };
 $('atkBtn').addEventListener('touchstart', e => { e.preventDefault(); socket.emit('attack'); }, { passive:false });
 $('atkBtn').onclick = () => socket.emit('attack');
@@ -288,6 +399,9 @@ function loop() {
   for (let y = 0; y <= world.H; y += 80) { ctx.beginPath(); ctx.moveTo(0,y); ctx.lineTo(world.W,y); ctx.stroke(); }
   ctx.strokeStyle = '#e8d9a8'; ctx.lineWidth = 4; ctx.strokeRect(0, 0, world.W, world.H);
   ctx.textAlign = 'center';
+  ctx.strokeStyle = 'rgba(120,200,255,.5)'; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
+  ctx.beginPath(); ctx.arc(world.W / 2, world.H / 2, world.SAFE || 150, 0, 7); ctx.stroke(); ctx.setLineDash([]);
+  ctx.fillStyle = 'rgba(120,200,255,.6)'; ctx.font = '13px sans-serif'; ctx.fillText('安全地帯(ここではたたかえない)', world.W / 2, world.H / 2 + 4);
   for (const m of monsters) {
     if (m.hp <= 0) continue;
     ctx.fillStyle = '#7ad67a'; ctx.beginPath(); ctx.ellipse(m.x, m.y, 18, 14, 0, 0, 7); ctx.fill();
@@ -297,10 +411,18 @@ function loop() {
   }
   for (const p of players) {
     const s = smooth[p.id], sw = swing[p.id];
+    ctx.globalAlpha = p.dead ? 0.35 : 1;
     if (sw && sw.until > now) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(s.x, s.y, sw.r || 80, 0, 7); ctx.stroke(); }
     ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(s.x, s.y+14, 16, 6, 0, 0, 7); ctx.fill();
     ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(s.x, s.y, 16, 0, 7); ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = p.id === me ? '#fff' : 'rgba(0,0,0,.5)'; ctx.stroke();
+    if (p.wid) {
+      const a = arts[p.wid];
+      if (a) { ctx.imageSmoothingEnabled = false; ctx.drawImage(a, s.x + 8, s.y - 24, 32, 32); }
+      else if (!String(p.wid).startsWith('c')) { ctx.strokeStyle = '#cfd8dc'; ctx.lineWidth = 4; ctx.beginPath(); ctx.moveTo(s.x + 12, s.y + 8); ctx.lineTo(s.x + 34, s.y - 16); ctx.stroke(); }
+    }
+    ctx.fillStyle = '#400'; ctx.fillRect(s.x - 18, s.y + 22, 36, 4);
+    ctx.fillStyle = '#4c4'; ctx.fillRect(s.x - 18, s.y + 22, 36 * Math.max(0, p.hp) / p.mhp, 4);
     ctx.fillStyle = '#fff'; ctx.font = '12px sans-serif';
     ctx.fillText(p.name + ' Lv' + p.lv, s.x, s.y - 36);
     ctx.fillStyle = '#ffd98a'; ctx.fillText(p.race + ' ' + jobName(p), s.x, s.y - 24);
@@ -313,6 +435,12 @@ function loop() {
     }
   }
   ctx.restore();
+  const mp = mine();
+  if (mp && mp.dead) {
+    ctx.fillStyle = 'rgba(0,0,0,.5)'; ctx.fillRect(0, 0, vw, vh);
+    ctx.fillStyle = '#fff'; ctx.font = '28px sans-serif'; ctx.textAlign = 'center';
+    ctx.fillText('やられた…まもなく復活', vw / 2, vh / 2);
+  }
   requestAnimationFrame(loop);
 }
 </script>
