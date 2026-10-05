@@ -18,6 +18,7 @@
   :focus-visible { outline:3px solid var(--accent); outline-offset:2px; }
   button { padding:12px; font-size:16px; border:0; border-radius:8px; background:var(--accent); color:#1b1204; font-weight:700; }
   button:disabled { opacity:.35; }
+  button.sub { background:#34495c; color:var(--text); }
   .colors { display:flex; gap:10px; }
   .colors label { flex:1; }
   .colors input { display:none; }
@@ -40,12 +41,15 @@
   @media (pointer:coarse) { #stick { display:block; } }
   #btns { position:fixed; right:calc(16px + env(safe-area-inset-right,0px)); bottom:calc(24px + env(safe-area-inset-bottom,0px)); z-index:5; display:grid; gap:10px; justify-items:end; }
   #atkBtn { width:84px; height:84px; border-radius:50%; font-size:18px; }
-  #menuBtn { padding:10px 16px; background:#34495c; color:var(--text); }
+  #menuBtn, #autoBtn { padding:10px 16px; background:#34495c; color:var(--text); }
+  #autoBtn.on { background:var(--accent); color:#1b1204; }
   #menu { position:fixed; inset:0; background:rgba(0,0,0,.6); z-index:8; display:flex; align-items:center; justify-content:center; padding:16px; }
   #menu[hidden] { display:none; }
-  #menu .card { background:#16232f; border-radius:12px; padding:16px; width:100%; max-width:360px; max-height:90vh; overflow-y:auto; display:grid; gap:12px; }
+  #menu .card { background:#16232f; border-radius:12px; padding:16px; width:100%; max-width:380px; max-height:90vh; overflow-y:auto; display:grid; gap:12px; }
   #menu h2 { margin:0; font-size:18px; }
   .row { display:flex; align-items:center; justify-content:space-between; gap:8px; }
+  .row.locked { opacity:.55; }
+  .row.child { margin-left:18px; border-left:3px solid #34495c; padding-left:10px; }
   .row small { color:#9fb3c4; display:block; }
   .row button { padding:8px 14px; font-size:15px; }
 </style>
@@ -54,11 +58,10 @@
 <div id="login">
   <div class="box">
     <h1>みんなでアクションMMO</h1>
+    <button id="cont" hidden></button>
     <label class="f">名前<input id="nameIn" type="text" maxlength="12" placeholder="キャラの名前"></label>
     <label class="f">種族
-      <select id="raceIn">
-        <option>人間</option><option>エルフ</option><option>ドワーフ</option><option>獣人</option>
-      </select>
+      <select id="raceIn"><option>人間</option><option>エルフ</option><option>ドワーフ</option><option>獣人</option></select>
     </label>
     <label class="f">職業
       <select id="jobIn"><option>盗賊</option><option>戦士</option><option>魔法使い</option></select>
@@ -69,7 +72,8 @@
       <label><input type="radio" name="c" value="#5fd068"><span style="background:#5fd068"></span></label>
       <label><input type="radio" name="c" value="#c78bff"><span style="background:#c78bff"></span></label>
     </div>
-    <button id="go">はじめる</button>
+    <button id="go">はじめから</button>
+    <div id="warn" hidden style="font-size:12px;color:#9fb3c4">「はじめから」を押すと、いまのセーブは消えます。</div>
   </div>
 </div>
 
@@ -85,6 +89,7 @@
 <div id="stick"><div id="knob"></div></div>
 <div id="btns" hidden>
   <button id="menuBtn">メニュー</button>
+  <button id="autoBtn">オート: OFF</button>
   <button id="atkBtn">攻撃</button>
 </div>
 <div id="menu" hidden><div class="card" id="menuCard"></div></div>
@@ -93,10 +98,21 @@
 <script>
 const $ = id => document.getElementById(id);
 const cv = $('cv'), ctx = cv.getContext('2d');
-let socket, me = null, world = { W:1600, H:1200, EVO_LV:[0,5,10], chains:{} };
+let socket, me = null, world = { W:1600, H:1200, EVO_LV:[0,5,10], chains:{}, skills:{} };
 let players = [], monsters = [];
 const bubbles = {}, smooth = {}, swing = {};
 let menuKey = '';
+const SAVE_KEY = 'mmoSave1';
+
+function loadSave() { try { return JSON.parse(localStorage.getItem(SAVE_KEY)); } catch (e) { return null; } }
+function writeSave(d) { try { localStorage.setItem(SAVE_KEY, JSON.stringify(d)); } catch (e) {} }
+
+const saved = loadSave();
+if (saved && saved.name) {
+  $('cont').hidden = false; $('warn').hidden = false;
+  $('cont').textContent = 'つづきから: ' + saved.name + ' Lv' + saved.lv;
+  $('cont').onclick = () => start({ save: saved });
+}
 
 function resize() {
   const r = devicePixelRatio || 1;
@@ -108,17 +124,22 @@ addEventListener('resize', resize); resize();
 $('go').onclick = () => {
   const name = $('nameIn').value.trim();
   if (!name) { $('nameIn').focus(); return; }
+  start({ name, color: document.querySelector('input[name=c]:checked').value, race: $('raceIn').value, job: $('jobIn').value });
+};
+
+function start(join) {
   socket = io();
   socket.on('init', d => { me = d.id; world = d; });
+  socket.on('save', s => writeSave(s));
   socket.on('state', s => { players = s.players; monsters = s.monsters; updateUI(); });
   socket.on('chat', m => { addLog(m.name, m.text); bubbles[m.id] = { text:m.text, until:Date.now()+4000 }; });
   socket.on('system', t => addLog(null, t));
-  socket.on('atk', a => { swing[a.id] = Date.now() + 150; });
-  socket.emit('join', { name, color: document.querySelector('input[name=c]:checked').value, race: $('raceIn').value, job: $('jobIn').value });
+  socket.on('atk', a => { swing[a.id] = { until: Date.now() + 150, r: a.r }; });
+  socket.emit('join', join);
   $('login').style.display = 'none';
   $('chat').hidden = false; $('hud').hidden = false; $('btns').hidden = false;
   requestAnimationFrame(loop);
-};
+}
 
 function addLog(name, text) {
   const row = document.createElement('div');
@@ -136,36 +157,42 @@ $('chatForm').onsubmit = e => {
 
 const jobName = p => (world.chains[p.job] || [p.job])[p.stage];
 const mine = () => players.find(p => p.id === me);
+const mKey = p => [p.lv, p.sp, p.stage, JSON.stringify(p.sk)].join();
 
 function updateUI() {
   const p = mine(); if (!p) return;
-  const need = p.lv * 30;
   $('hud').innerHTML = '';
   const t = document.createElement('div');
   t.textContent = p.name + ' / ' + p.race + ' ' + jobName(p) + ' Lv' + p.lv;
   const g = document.createElement('div');
   g.textContent = 'ゴールド ' + p.gold + ' / SP ' + p.sp;
   const bar = document.createElement('div'); bar.id = 'bar';
-  const i = document.createElement('i'); i.style.width = Math.min(100, p.exp / need * 100) + '%';
+  const i = document.createElement('i'); i.style.width = Math.min(100, p.exp / (p.lv * 30) * 100) + '%';
   bar.appendChild(i);
   $('hud').append(t, g, bar);
-  const key = [p.lv, p.sp, p.stage, p.sk.power, p.sk.speed, p.sk.wisdom].join();
-  if (!$('menu').hidden && key !== menuKey) renderMenu();
+  if (!$('menu').hidden && mKey(p) !== menuKey) renderMenu();
 }
 
-const SK = [['power','パワー','攻撃力が上がる'], ['speed','スピード','移動が速くなる'], ['wisdom','かしこさ','経験値が増える']];
 function renderMenu() {
   const p = mine(); if (!p) return;
-  menuKey = [p.lv, p.sp, p.stage, p.sk.power, p.sk.speed, p.sk.wisdom].join();
+  menuKey = mKey(p);
   const c = $('menuCard'); c.innerHTML = '';
   const h = document.createElement('h2'); h.textContent = p.race + ' ' + jobName(p) + ' Lv' + p.lv; c.appendChild(h);
-  const sp = document.createElement('div'); sp.textContent = '使えるSP: ' + p.sp; c.appendChild(sp);
-  for (const [k, n, d] of SK) {
-    const r = document.createElement('div'); r.className = 'row';
-    const l = document.createElement('div'); l.textContent = n + ' ' + p.sk[k] + '/5';
-    const s = document.createElement('small'); s.textContent = d; l.appendChild(s);
+  const sp = document.createElement('div'); sp.textContent = '使えるSP: ' + p.sp + '(レベルが上がると1もらえる)'; c.appendChild(sp);
+  const S = world.skills;
+  for (const k in S) {
+    const d = S[k];
+    if (d.jobs && !d.jobs.includes(p.job)) continue;
+    const need = Object.keys(d.req);
+    const ok = need.every(r => p.sk[r] >= d.req[r]);
+    const r = document.createElement('div');
+    r.className = 'row' + (need.length ? ' child' : '') + (ok ? '' : ' locked');
+    const l = document.createElement('div'); l.textContent = d.name + ' Lv' + p.sk[k];
+    const s = document.createElement('small');
+    s.textContent = ok ? d.desc : '解放: ' + need.map(x => S[x].name + d.req[x]).join('、') + ' が必要';
+    l.appendChild(s);
     const b = document.createElement('button'); b.textContent = '+';
-    b.disabled = p.sp < 1 || p.sk[k] >= 5;
+    b.disabled = !ok || p.sp < 1;
     b.onclick = () => socket.emit('skill', k);
     r.append(l, b); c.appendChild(r);
   }
@@ -205,12 +232,41 @@ stick.addEventListener('touchmove', e => { e.preventDefault(); moveStick(e.touch
 const endStick = () => { stickV = { x:0, y:0 }; knob.style.left = '40px'; knob.style.top = '40px'; };
 stick.addEventListener('touchend', endStick); stick.addEventListener('touchcancel', endStick);
 
+let auto = false, lastAtk = 0, wake = null;
+async function setWake(on) {
+  try {
+    if (on && navigator.wakeLock) wake = await navigator.wakeLock.request('screen');
+    else if (wake) { await wake.release(); wake = null; }
+  } catch (e) {}
+}
+function setAuto(on) {
+  auto = on;
+  $('autoBtn').textContent = 'オート: ' + (on ? 'ON' : 'OFF');
+  $('autoBtn').classList.toggle('on', on);
+  setWake(on);
+}
+$('autoBtn').onclick = () => setAuto(!auto);
+addEventListener('visibilitychange', () => { if (auto && document.visibilityState === 'visible') setWake(true); });
+
 function sendInput() {
   let dx = stickV.x, dy = stickV.y;
   if (keys['a'] || keys['arrowleft']) dx -= 1;
   if (keys['d'] || keys['arrowright']) dx += 1;
   if (keys['w'] || keys['arrowup']) dy -= 1;
   if (keys['s'] || keys['arrowdown']) dy += 1;
+  if (auto) {
+    if (Math.hypot(dx, dy) > 0.2) setAuto(false);
+    else {
+      const p = mine(); let best = null, bd = 1e9;
+      if (p) for (const m of monsters) {
+        if (m.hp <= 0) continue;
+        const d = Math.hypot(m.x - p.x, m.y - p.y);
+        if (d < bd) { bd = d; best = m; }
+      }
+      if (best && bd > 45) { dx = (best.x - p.x) / bd; dy = (best.y - p.y) / bd; }
+      if (best && bd < 70 && Date.now() - lastAtk > 420) { lastAtk = Date.now(); socket.emit('attack'); }
+    }
+  }
   const k = dx.toFixed(2) + ',' + dy.toFixed(2);
   if (k !== lastIn) { lastIn = k; socket.emit('input', { dx, dy }); }
 }
@@ -240,8 +296,8 @@ function loop() {
     ctx.fillStyle = '#e44'; ctx.fillRect(m.x-18, m.y-24, 36 * m.hp / m.max, 4);
   }
   for (const p of players) {
-    const s = smooth[p.id];
-    if (swing[p.id] > now) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(s.x, s.y, 70, 0, 7); ctx.stroke(); }
+    const s = smooth[p.id], sw = swing[p.id];
+    if (sw && sw.until > now) { ctx.strokeStyle = 'rgba(255,255,255,.8)'; ctx.lineWidth = 3; ctx.beginPath(); ctx.arc(s.x, s.y, sw.r || 80, 0, 7); ctx.stroke(); }
     ctx.fillStyle = 'rgba(0,0,0,.3)'; ctx.beginPath(); ctx.ellipse(s.x, s.y+14, 16, 6, 0, 0, 7); ctx.fill();
     ctx.fillStyle = p.color; ctx.beginPath(); ctx.arc(s.x, s.y, 16, 0, 7); ctx.fill();
     ctx.lineWidth = 3; ctx.strokeStyle = p.id === me ? '#fff' : 'rgba(0,0,0,.5)'; ctx.stroke();
