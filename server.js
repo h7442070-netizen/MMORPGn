@@ -9,9 +9,12 @@ app.use(express.static(__dirname + '/public'));
 
 const W = 1600, H = 1200, SAFE = 150; // SAFE = 中央の安全地帯(PvPなし)
 const RACES = {
-  '人間': { atk: 0, spd: 0 }, 'エルフ': { atk: 0, spd: 20 },
-  'ドワーフ': { atk: 3, spd: -20 }, '獣人': { atk: 2, spd: 30 }
+  '人間': { atk: 0, spd: 0, hp: 0 }, 'エルフ': { atk: 0, spd: 20, hp: 0 },
+  'ドワーフ': { atk: 3, spd: -20, hp: 20 }, '獣人': { atk: 2, spd: 30, hp: 0 },
+  'スライム': { atk: 0, spd: 0, hp: 60 }, 'ゴブリン': { atk: 2, spd: 10, hp: 10 }, 'ドラゴン': { atk: 6, spd: -10, hp: 30 },
+  'キマイラ': { atk: 10, spd: 20, hp: 100 }
 };
+const MONSTER_RACES = ['スライム', 'ゴブリン', 'ドラゴン'];
 const CHAINS = {
   '盗賊': ['盗賊', '怪盗', '魔王'],
   '戦士': ['戦士', '騎士', '勇者'],
@@ -25,7 +28,10 @@ const SKILLS = {
   smash:  { name: '強打',     desc: '攻撃力 +5 / Lv', req: { power: 3 }, jobs: ['戦士'] },
   steal:  { name: 'ぬすむ',   desc: 'ゴールド +30% / Lv', req: { speed: 3 }, jobs: ['盗賊'] },
   range:  { name: '範囲拡大', desc: '攻撃のはんいが広がる(上限あり)', req: { wisdom: 3 }, jobs: ['魔法使い'] },
-  master: { name: '極意',     desc: '攻撃力 +10 / Lv', req: { power: 5, speed: 5, wisdom: 5 } }
+  master: { name: '極意',     desc: '攻撃力 +10 / Lv', req: { power: 5, speed: 5, wisdom: 5 } },
+  kpower: { name: 'キマイラの力', desc: '攻撃力 +15 / Lv', req: { power: 3 }, races: ['キマイラ'] },
+  regen:  { name: '再生',         desc: 'HPの回復が速くなる(+5/秒 / Lv)', req: { wisdom: 3 }, races: ['キマイラ'] },
+  devour: { name: '捕食',         desc: '魔物をたおすとHP回復と経験値アップ', req: { kpower: 3 }, races: ['キマイラ'] }
 };
 const KEYS = Object.keys(SKILLS);
 const MAXSK = 9999;
@@ -43,14 +49,24 @@ const players = {};
 const clean = (s, n) => String(s || '').replace(/[\r\n]+/g, ' ').trim().slice(0, n);
 const num = (v, lo, hi) => Math.max(lo, Math.min(hi, Math.floor(Number(v) || 0)));
 
+const MTYPES = {
+  slime:  { name: 'スライム', hp: 30, spd: 60,  dmg: 6,  exp: 12, gold: 5 },
+  goblin: { name: 'ゴブリン', hp: 70, spd: 90,  dmg: 12, exp: 28, gold: 14 },
+  wolf:   { name: 'オオカミ', hp: 55, spd: 150, dmg: 10, exp: 22, gold: 10 }
+};
+const MKEYS = Object.keys(MTYPES);
 const monsters = [];
-for (let i = 0; i < 12; i++) monsters.push({ id: i, x: 100 + Math.random() * (W - 200), y: 100 + Math.random() * (H - 200), hp: 30, max: 30, back: 0 });
+for (let i = 0; i < 14; i++) {
+  const type = MKEYS[i % 3], t = MTYPES[type];
+  const x = 100 + Math.random() * (W - 200), y = 100 + Math.random() * (H - 200);
+  monsters.push({ id: i, type, x, y, hx: x, hy: y, hp: t.hp, max: t.hp, back: 0, cd: 0, wx: x, wy: y, wt: 0 });
+}
 
 const eqWeapon = p => p.weapons.find(w => w.id === p.eq);
-const atkOf = p => 8 + RACES[p.race].atk + p.stage * 5 + p.lv + p.sk.power * 3 + p.sk.smash * 5 + p.sk.master * 10 + (eqWeapon(p) ? eqWeapon(p).atk : 0);
+const atkOf = p => 8 + RACES[p.race].atk + p.stage * 5 + p.lv + p.sk.power * 3 + p.sk.smash * 5 + p.sk.master * 10 + p.sk.kpower * 15 + (eqWeapon(p) ? eqWeapon(p).atk : 0);
 const spdOf = p => Math.min(520, 220 + RACES[p.race].spd + p.sk.speed * 15);
 const rangeOf = p => Math.min(250, 80 + p.sk.range * 10);
-const mhpOf = p => 100 + p.lv * 10 + p.stage * 50;
+const mhpOf = p => 100 + p.lv * 10 + p.stage * 50 + (RACES[p.race].hp || 0);
 const inSafe = p => Math.hypot(p.x - W / 2, p.y - H / 2) < SAFE;
 
 function cleanWeapons(arr) {
@@ -79,7 +95,12 @@ io.on('connection', (socket) => {
     d = d || {};
     const s = d.save && typeof d.save === 'object' ? d.save : null;
     const src = s || d;
-    const race = RACES[src.race] ? src.race : '人間';
+    let race = RACES[src.race] ? src.race : '人間';
+    let born = false;
+    if (!s) {
+      if (race === 'キマイラ') race = '人間';
+      else if (MONSTER_RACES.includes(race) && Math.random() < 0.1) { race = 'キマイラ'; born = true; }
+    }
     const job = CHAINS[src.job] ? src.job : '盗賊';
     const sk = {}; KEYS.forEach(k => { sk[k] = s && s.sk ? num(s.sk[k], 0, MAXSK) : 0; });
     const lv = s ? num(s.lv, 1, 99999) : 1;
@@ -98,6 +119,7 @@ io.on('connection', (socket) => {
     const a = artOf(p); if (a) io.emit('wart', a);
     sendSave(p);
     io.emit('system', p.name + ' が入ってきた');
+    if (born) io.emit('system', p.name + ' はキマイラに生まれた!');
   });
 
   socket.on('input', (d) => {
@@ -125,8 +147,10 @@ io.on('connection', (socket) => {
       m.hp -= atkOf(p);
       if (m.hp <= 0) {
         changed = true; m.back = now + 5000;
-        p.exp += Math.round(12 * (1 + p.sk.wisdom * 0.2));
-        p.gold += Math.round(5 * (1 + p.sk.steal * 0.3));
+        const mt = MTYPES[m.type];
+        p.exp += Math.round(mt.exp * (1 + p.sk.wisdom * 0.2 + p.sk.devour * 0.1));
+        p.gold += Math.round(mt.gold * (1 + p.sk.steal * 0.3));
+        if (p.sk.devour) p.hp = Math.min(mhpOf(p), p.hp + p.sk.devour * 10);
         while (p.exp >= p.lv * 30) {
           p.exp -= p.lv * 30; p.lv++; p.sp++;
           io.emit('system', p.name + ' が Lv' + p.lv + ' になった');
@@ -152,6 +176,7 @@ io.on('connection', (socket) => {
     const p = players[socket.id], def = SKILLS[key];
     if (!p || !def || p.sp < 1 || p.sk[key] >= MAXSK) return;
     if (def.jobs && !def.jobs.includes(p.job)) return;
+    if (def.races && !def.races.includes(p.race)) return;
     for (const r in def.req) if (p.sk[r] < def.req[r]) return;
     p.sk[key]++; p.sp--; sendSave(p);
   });
@@ -200,16 +225,41 @@ setInterval(() => {
     const s = spdOf(p);
     p.x = Math.max(16, Math.min(W - 16, p.x + p.dx * s * dt));
     p.y = Math.max(16, Math.min(H - 16, p.y + p.dy * s * dt));
-    p.hp = Math.min(mhpOf(p), p.hp + 3 * dt);
+    p.hp = Math.min(mhpOf(p), p.hp + (3 + p.sk.regen * 5) * dt);
   }
-  for (const m of monsters) if (m.hp <= 0 && now >= m.back) m.hp = m.max;
+  for (const m of monsters) {
+    const t = MTYPES[m.type];
+    if (m.hp <= 0) { if (now >= m.back) { m.hp = m.max; m.x = m.hx; m.y = m.hy; } continue; }
+    let tgt = null, bd = 260;
+    for (const q of Object.values(players)) {
+      if (q.dead || inSafe(q)) continue;
+      const dd = Math.hypot(q.x - m.x, q.y - m.y);
+      if (dd < bd) { bd = dd; tgt = q; }
+    }
+    let tx, ty, sp = t.spd;
+    if (tgt) { tx = tgt.x; ty = tgt.y; }
+    else {
+      if (now > m.wt) { m.wx = m.hx + Math.random() * 160 - 80; m.wy = m.hy + Math.random() * 160 - 80; m.wt = now + 2000 + Math.random() * 2000; }
+      tx = m.wx; ty = m.wy; sp *= 0.4;
+    }
+    const d = Math.hypot(tx - m.x, ty - m.y);
+    if (d > (tgt ? 26 : 4)) { m.x += (tx - m.x) / d * sp * dt; m.y += (ty - m.y) / d * sp * dt; }
+    const cd = Math.hypot(m.x - W / 2, m.y - H / 2);
+    if (cd > 0.1 && cd < SAFE + 20) { m.x = W / 2 + (m.x - W / 2) / cd * (SAFE + 20); m.y = H / 2 + (m.y - H / 2) / cd * (SAFE + 20); }
+    if (tgt && d <= 34 && now >= m.cd) {
+      m.cd = now + 1000;
+      tgt.hp -= t.dmg;
+      io.emit('matk', { id: m.id });
+      if (tgt.hp <= 0) { tgt.hp = 0; tgt.dead = now + 3000; tgt.dx = tgt.dy = 0; io.emit('system', tgt.name + ' が ' + t.name + ' にたおされた…'); }
+    }
+  }
   io.emit('state', {
     players: Object.values(players).map(p => ({
       id: p.id, name: p.name, color: p.color, race: p.race, job: p.job, stage: p.stage,
       lv: p.lv, exp: p.exp, gold: p.gold, sp: p.sp, sk: p.sk, x: Math.round(p.x), y: Math.round(p.y),
       hp: Math.round(p.hp), mhp: mhpOf(p), dead: !!p.dead, wid: p.eq
     })),
-    monsters: monsters.map(m => ({ id: m.id, x: Math.round(m.x), y: Math.round(m.y), hp: m.hp, max: m.max }))
+    monsters: monsters.map(m => ({ id: m.id, type: m.type, x: Math.round(m.x), y: Math.round(m.y), hp: m.hp, max: m.max }))
   });
 }, 50);
 
