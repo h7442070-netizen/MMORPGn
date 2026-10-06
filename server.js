@@ -31,9 +31,28 @@ const SKILLS = {
   master: { name: '極意',     desc: '攻撃力 +10 / Lv', req: { power: 5, speed: 5, wisdom: 5 } },
   kpower: { name: 'キマイラの力', desc: '攻撃力 +15 / Lv', req: { power: 3 }, races: ['キマイラ'] },
   regen:  { name: '再生',         desc: 'HPの回復が速くなる(+5/秒 / Lv)', req: { wisdom: 3 }, races: ['キマイラ'] },
-  devour: { name: '捕食',         desc: '魔物をたおすとHP回復と経験値アップ', req: { kpower: 3 }, races: ['キマイラ'] }
+  devour: { name: '捕食',         desc: '魔物をたおすとHP回復と経験値アップ', req: { kpower: 3 }, races: ['キマイラ'] },
+  spin:     { name: '回転切り', desc: '【技】まわりを切る(攻撃力×1.5)。Lvを上げると強くなる', req: {} },
+  pride:    { name: '傲慢',     desc: '【技】まわりを攻撃して、8秒間 攻撃力2倍', req: { power: 5 } },
+  greed:    { name: '強欲',     desc: '【技】まわりを攻撃。この技でたおすとゴールド3倍', req: { wisdom: 5 } },
+  envy:     { name: '嫉妬',     desc: '【技】まわりを攻撃して、与えたダメージの半分を回復', req: { speed: 5 } },
+  wrath:    { name: '憤怒',     desc: '【技】せまいはんいに攻撃力×4の大ダメージ', req: { power: 8 } },
+  gluttony: { name: '暴食',     desc: '【技】広く攻撃して、たおした数だけHP回復', req: { wisdom: 8 } },
+  sloth:    { name: '怠惰',     desc: '【技】広く攻撃して、敵を5秒間おそくする', req: { speed: 8 } },
+  lust:     { name: '色欲',     desc: '【技】まわりを攻撃して、魔物が5秒間こちらを攻撃しなくなる', req: { wisdom: 10 } }
 };
 const KEYS = Object.keys(SKILLS);
+// 技(ボタンで使う): cd=待ち時間(ms) r=はんい m=攻撃力の倍率 c=エフェクトの色。スキルのレベルが上がるほど +20%
+const ACT = {
+  spin:     { name: '回転切り', cd: 4000,  r: 120, m: 1.5, c: '#ffffff' },
+  pride:    { name: '傲慢',     cd: 20000, r: 130, m: 1.5, c: '#ffd700' },
+  greed:    { name: '強欲',     cd: 12000, r: 150, m: 1.2, c: '#ffb300' },
+  envy:     { name: '嫉妬',     cd: 10000, r: 150, m: 1.5, c: '#43d17a' },
+  wrath:    { name: '憤怒',     cd: 15000, r: 100, m: 4,   c: '#ff3b30' },
+  gluttony: { name: '暴食',     cd: 14000, r: 170, m: 2,   c: '#a0522d' },
+  sloth:    { name: '怠惰',     cd: 12000, r: 200, m: 1,   c: '#7aa7ff' },
+  lust:     { name: '色欲',     cd: 16000, r: 180, m: 1.2, c: '#ff7ac8' }
+};
 const MAXSK = 9999;
 const SHOP = [
   { id: 'wood',   name: '木の剣',     atk: 3,  price: 50 },
@@ -63,11 +82,46 @@ for (let i = 0; i < 14; i++) {
 }
 
 const eqWeapon = p => p.weapons.find(w => w.id === p.eq);
-const atkOf = p => 8 + RACES[p.race].atk + p.stage * 5 + p.lv + p.sk.power * 3 + p.sk.smash * 5 + p.sk.master * 10 + p.sk.kpower * 15 + (eqWeapon(p) ? eqWeapon(p).atk : 0);
+const atkRaw = p => 8 + RACES[p.race].atk + p.stage * 5 + p.lv + p.sk.power * 3 + p.sk.smash * 5 + p.sk.master * 10 + p.sk.kpower * 15 + (eqWeapon(p) ? eqWeapon(p).atk : 0);
+const atkOf = p => atkRaw(p) * (p.pride > Date.now() ? 2 : 1);
 const spdOf = p => Math.min(520, 220 + RACES[p.race].spd + p.sk.speed * 15);
 const rangeOf = p => Math.min(250, 80 + p.sk.range * 10);
 const mhpOf = p => 100 + p.lv * 10 + p.stage * 50 + (RACES[p.race].hp || 0);
 const inSafe = p => Math.hypot(p.x - W / 2, p.y - H / 2) < SAFE;
+
+// ---- 建築 ----
+const CELL = 40, MAXBLOCKS = 800, BLOCK_COST = 10;
+const blocks = new Map(); // 'gx,gy' -> { gx, gy, o(持ち主のid) }
+const blockList = () => [...blocks.values()];
+function blockedAt(x, y, r) {
+  const gx = Math.floor(x / CELL), gy = Math.floor(y / CELL);
+  for (let i = gx - 1; i <= gx + 1; i++) for (let j = gy - 1; j <= gy + 1; j++) {
+    if (!blocks.has(i + ',' + j)) continue;
+    const nx = Math.max(i * CELL, Math.min(x, (i + 1) * CELL)), ny = Math.max(j * CELL, Math.min(y, (j + 1) * CELL));
+    if (Math.hypot(x - nx, y - ny) < r) return true;
+  }
+  return false;
+}
+
+// ---- 技で使う共通の処理 ----
+function reward(p, m, now, goldMul) {
+  m.back = now + 5000;
+  const mt = MTYPES[m.type];
+  p.exp += Math.round(mt.exp * (1 + p.sk.wisdom * 0.2 + p.sk.devour * 0.1));
+  p.gold += Math.round(mt.gold * (1 + p.sk.steal * 0.3) * (goldMul || 1));
+  if (p.sk.devour) p.hp = Math.min(mhpOf(p), p.hp + p.sk.devour * 10);
+  while (p.exp >= p.lv * 30) { p.exp -= p.lv * 30; p.lv++; p.sp++; io.emit('system', p.name + ' が Lv' + p.lv + ' になった'); }
+}
+function hurtPlayer(p, q, dmg, now) {
+  q.hp -= dmg;
+  if (q.hp > 0) return false;
+  q.hp = 0; q.dead = now + 3000; q.dx = q.dy = 0;
+  const loot = Math.floor(q.gold * 0.1);
+  q.gold -= loot; p.gold += loot;
+  sendSave(q);
+  io.emit('system', p.name + ' が ' + q.name + ' をたおした!(' + loot + 'G うばった)');
+  return true;
+}
 
 function cleanWeapons(arr) {
   const out = [];
@@ -84,7 +138,7 @@ function cleanWeapons(arr) {
 
 const snapshot = p => ({
   name: p.name, color: p.color, race: p.race, job: p.job, stage: p.stage,
-  lv: p.lv, exp: p.exp, gold: p.gold, sp: p.sp, sk: p.sk, weapons: p.weapons, eq: p.eq
+  lv: p.lv, exp: p.exp, gold: p.gold, sp: p.sp, sk: p.sk, weapons: p.weapons, eq: p.eq, uid: p.uid
 });
 const sendSave = p => p.sock.emit('save', snapshot(p));
 const artOf = p => { const w = eqWeapon(p); return w && w.pix ? { id: w.id, pix: w.pix } : null; };
@@ -105,19 +159,21 @@ io.on('connection', (socket) => {
     const sk = {}; KEYS.forEach(k => { sk[k] = s && s.sk ? num(s.sk[k], 0, MAXSK) : 0; });
     const lv = s ? num(s.lv, 1, 99999) : 1;
     const weapons = s ? cleanWeapons(s.weapons) : [];
+    const uid = s && /^[a-z0-9]{8,20}$/.test(String(s.uid)) ? s.uid : (Math.random().toString(36).slice(2) + 'abcdefgh').slice(0, 10);
     const p = players[socket.id] = {
       id: socket.id, sock: socket, name: clean(src.name, 12) || 'なまえなし',
       color: /^#[0-9a-f]{6}$/i.test(src.color) ? src.color : '#4aa3ff',
       race, job, stage: s ? num(s.stage, 0, 2) : 0, lv,
       exp: s ? num(s.exp, 0, lv * 30) : 0, gold: s ? num(s.gold, 0, 1e9) : 0, sp: s ? num(s.sp, 0, 1e6) : 0, sk,
       weapons, eq: s && weapons.some(w => w.id === s.eq) ? s.eq : null,
-      x: 0, y: 0, dx: 0, dy: 0, cd: 0, dead: 0, hp: 0
+      x: 0, y: 0, dx: 0, dy: 0, cd: 0, dead: 0, hp: 0, uid, cds: {}, pride: 0
     };
     spawn(p); p.hp = mhpOf(p);
-    socket.emit('init', { id: socket.id, W, H, SAFE, EVO_LV, chains: CHAINS, skills: SKILLS, SHOP, TIERS });
+    socket.emit('init', { id: socket.id, W, H, SAFE, EVO_LV, chains: CHAINS, skills: SKILLS, SHOP, TIERS, ACT, CELL, BLOCK_COST });
     for (const q of Object.values(players)) { const a = artOf(q); if (a) socket.emit('wart', a); }
     const a = artOf(p); if (a) io.emit('wart', a);
     sendSave(p);
+    socket.emit('blocks', blockList());
     io.emit('system', p.name + ' が入ってきた');
     if (born) io.emit('system', p.name + ' はキマイラに生まれた!');
   });
@@ -210,6 +266,57 @@ io.on('connection', (socket) => {
     sendSave(p);
   });
 
+  socket.on('cast', (key) => {
+    const p = players[socket.id], a = ACT[key], now = Date.now();
+    if (!p || !a || p.dead || !p.sk[key] || now < (p.cds[key] || 0)) return;
+    p.cds[key] = now + a.cd;
+    const lv = p.sk[key];
+    const dmg = Math.round(atkOf(p) * a.m * (1 + 0.2 * (lv - 1)));
+    io.emit('cast', { id: p.id, key, r: a.r, c: a.c });
+    let dealt = 0, kills = 0;
+    for (const m of monsters) {
+      if (m.hp <= 0 || Math.hypot(m.x - p.x, m.y - p.y) > a.r) continue;
+      dealt += Math.min(dmg, m.hp);
+      if (key === 'sloth') m.slow = now + 5000;
+      if (key === 'lust') m.charm = now + 5000;
+      m.hp -= dmg;
+      if (m.hp <= 0) { kills++; reward(p, m, now, key === 'greed' ? 3 : 1); }
+    }
+    if (!inSafe(p)) for (const q of Object.values(players)) {
+      if (q === p || q.dead || inSafe(q) || Math.hypot(q.x - p.x, q.y - p.y) > a.r) continue;
+      dealt += Math.min(dmg, Math.max(0, q.hp));
+      hurtPlayer(p, q, dmg, now);
+    }
+    if (key === 'pride') p.pride = now + 8000;
+    if (key === 'envy') p.hp = Math.min(mhpOf(p), p.hp + dealt * 0.5);
+    if (key === 'gluttony') p.hp = Math.min(mhpOf(p), p.hp + kills * 15);
+    sendSave(p);
+  });
+
+  socket.on('build', (d) => {
+    const p = players[socket.id]; if (!p || !d || p.dead) return;
+    const gx = num(d.gx, 0, Math.floor(W / CELL) - 1), gy = num(d.gy, 0, Math.floor(H / CELL) - 1);
+    const key = gx + ',' + gy, cx = gx * CELL + CELL / 2, cy = gy * CELL + CELL / 2;
+    if (blocks.has(key)) return;
+    if (p.gold < BLOCK_COST) return socket.emit('sys1', 'ゴールドが足りません');
+    if (Math.hypot(cx - p.x, cy - p.y) > 220) return socket.emit('sys1', 'とおすぎて置けません');
+    if (Math.hypot(cx - W / 2, cy - H / 2) < SAFE + 30) return socket.emit('sys1', '安全地帯には置けません');
+    if (blocks.size >= MAXBLOCKS) return socket.emit('sys1', 'ブロックが多すぎます');
+    if (blockList().filter(b => b.o === p.uid).length >= 100) return socket.emit('sys1', '1人100個までです');
+    for (const q of Object.values(players)) if (Math.hypot(cx - q.x, cy - q.y) < CELL) return socket.emit('sys1', '人がいる場所には置けません');
+    p.gold -= BLOCK_COST; blocks.set(key, { gx, gy, o: p.uid });
+    io.emit('blocks', blockList()); sendSave(p);
+  });
+
+  socket.on('unbuild', (d) => {
+    const p = players[socket.id]; if (!p || !d) return;
+    const key = num(d.gx, 0, 999) + ',' + num(d.gy, 0, 999), b = blocks.get(key);
+    if (!b) return;
+    if (b.o !== p.uid) return socket.emit('sys1', '自分のブロックしかこわせません');
+    blocks.delete(key); p.gold += 5;
+    io.emit('blocks', blockList()); sendSave(p);
+  });
+
   socket.on('disconnect', () => {
     const p = players[socket.id];
     if (p) io.emit('system', p.name + ' が出ていった');
@@ -223,14 +330,16 @@ setInterval(() => {
   for (const p of Object.values(players)) {
     if (p.dead) { if (now >= p.dead) { p.dead = 0; spawn(p); p.hp = mhpOf(p); } continue; }
     const s = spdOf(p);
-    p.x = Math.max(16, Math.min(W - 16, p.x + p.dx * s * dt));
-    p.y = Math.max(16, Math.min(H - 16, p.y + p.dy * s * dt));
+    const nx = Math.max(16, Math.min(W - 16, p.x + p.dx * s * dt));
+    if (!blockedAt(nx, p.y, 14) || blockedAt(p.x, p.y, 14)) p.x = nx;
+    const ny = Math.max(16, Math.min(H - 16, p.y + p.dy * s * dt));
+    if (!blockedAt(p.x, ny, 14) || blockedAt(p.x, p.y, 14)) p.y = ny;
     p.hp = Math.min(mhpOf(p), p.hp + (3 + p.sk.regen * 5) * dt);
   }
   for (const m of monsters) {
     const t = MTYPES[m.type];
     if (m.hp <= 0) { if (now >= m.back) { m.hp = m.max; m.x = m.hx; m.y = m.hy; } continue; }
-    let tgt = null, bd = 260;
+    let tgt = null, bd = m.charm > now ? 0 : 260;
     for (const q of Object.values(players)) {
       if (q.dead || inSafe(q)) continue;
       const dd = Math.hypot(q.x - m.x, q.y - m.y);
@@ -243,7 +352,12 @@ setInterval(() => {
       tx = m.wx; ty = m.wy; sp *= 0.4;
     }
     const d = Math.hypot(tx - m.x, ty - m.y);
-    if (d > (tgt ? 26 : 4)) { m.x += (tx - m.x) / d * sp * dt; m.y += (ty - m.y) / d * sp * dt; }
+    if (m.slow > now) sp *= 0.3;
+    if (d > (tgt ? 26 : 4)) {
+      const mx = m.x + (tx - m.x) / d * sp * dt, my = m.y + (ty - m.y) / d * sp * dt;
+      if (!blockedAt(mx, m.y, 16)) m.x = mx;
+      if (!blockedAt(m.x, my, 16)) m.y = my;
+    }
     const cd = Math.hypot(m.x - W / 2, m.y - H / 2);
     if (cd > 0.1 && cd < SAFE + 20) { m.x = W / 2 + (m.x - W / 2) / cd * (SAFE + 20); m.y = H / 2 + (m.y - H / 2) / cd * (SAFE + 20); }
     if (tgt && d <= 34 && now >= m.cd) {
