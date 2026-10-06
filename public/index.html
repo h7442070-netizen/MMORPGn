@@ -61,7 +61,7 @@
     <button id="cont" hidden></button>
     <label class="f">名前<input id="nameIn" type="text" maxlength="12" placeholder="キャラの名前"></label>
     <label class="f">種族
-      <select id="raceIn"><option>人間</option><option>エルフ</option><option>ドワーフ</option><option>獣人</option></select>
+      <select id="raceIn"><optgroup label="ひと"><option>人間</option><option>エルフ</option><option>ドワーフ</option><option>獣人</option></optgroup><optgroup label="魔物(まれにキマイラになる)"><option>スライム</option><option>ゴブリン</option><option>ドラゴン</option></optgroup></select>
     </label>
     <label class="f">職業
       <select id="jobIn"><option>盗賊</option><option>戦士</option><option>魔法使い</option></select>
@@ -102,7 +102,7 @@ const $ = id => document.getElementById(id);
 const cv = $('cv'), ctx = cv.getContext('2d');
 let socket, me = null, world = { W:1600, H:1200, EVO_LV:[0,5,10], chains:{}, skills:{} };
 let players = [], monsters = [];
-const bubbles = {}, smooth = {}, swing = {};
+const bubbles = {}, smooth = {}, swing = {}, mflash = {};
 let menuKey = '';
 const SAVE_KEY = 'mmoSave1';
 
@@ -137,6 +137,7 @@ function start(join) {
   socket.on('state', s => { players = s.players; monsters = s.monsters; updateUI(); });
   socket.on('chat', m => { addLog(m.name, m.text); bubbles[m.id] = { text:m.text, until:Date.now()+4000 }; });
   socket.on('system', t => addLog(null, t));
+  socket.on('matk', a => { mflash[a.id] = Date.now() + 200; });
   socket.on('atk', a => { swing[a.id] = { until: Date.now() + 150, r: a.r }; });
   socket.emit('join', join);
   $('login').style.display = 'none';
@@ -186,6 +187,7 @@ function renderMenu() {
   for (const k in S) {
     const d = S[k];
     if (d.jobs && !d.jobs.includes(p.job)) continue;
+    if (d.races && !d.races.includes(p.race)) continue;
     const need = Object.keys(d.req);
     const ok = need.every(r => p.sk[r] >= d.req[r]);
     const r = document.createElement('div');
@@ -402,12 +404,17 @@ function loop() {
   ctx.strokeStyle = 'rgba(120,200,255,.5)'; ctx.lineWidth = 3; ctx.setLineDash([10, 8]);
   ctx.beginPath(); ctx.arc(world.W / 2, world.H / 2, world.SAFE || 150, 0, 7); ctx.stroke(); ctx.setLineDash([]);
   ctx.fillStyle = 'rgba(120,200,255,.6)'; ctx.font = '13px sans-serif'; ctx.fillText('安全地帯(ここではたたかえない)', world.W / 2, world.H / 2 + 4);
+  const MC = { slime: ['#7ad67a', 18, 14], goblin: ['#c9a227', 16, 16], wolf: ['#9aa0a6', 22, 12] };
+  const MN = { slime: 'スライム', goblin: 'ゴブリン', wolf: 'オオカミ' };
   for (const m of monsters) {
     if (m.hp <= 0) continue;
-    ctx.fillStyle = '#7ad67a'; ctx.beginPath(); ctx.ellipse(m.x, m.y, 18, 14, 0, 0, 7); ctx.fill();
+    const mc = MC[m.type] || MC.slime;
+    ctx.fillStyle = mc[0]; ctx.beginPath(); ctx.ellipse(m.x, m.y, mc[1], mc[2], 0, 0, 7); ctx.fill();
+    if (mflash[m.id] > now) { ctx.strokeStyle = '#f33'; ctx.lineWidth = 4; ctx.stroke(); }
     ctx.fillStyle = '#143'; ctx.fillRect(m.x-7, m.y-4, 3, 3); ctx.fillRect(m.x+4, m.y-4, 3, 3);
-    ctx.fillStyle = '#400'; ctx.fillRect(m.x-18, m.y-24, 36, 4);
-    ctx.fillStyle = '#e44'; ctx.fillRect(m.x-18, m.y-24, 36 * m.hp / m.max, 4);
+    ctx.fillStyle = '#400'; ctx.fillRect(m.x-18, m.y-28, 36, 4);
+    ctx.fillStyle = '#e44'; ctx.fillRect(m.x-18, m.y-28, 36 * m.hp / m.max, 4);
+    ctx.fillStyle = '#fff'; ctx.font = '11px sans-serif'; ctx.fillText(MN[m.type] || '', m.x, m.y - 32);
   }
   for (const p of players) {
     const s = smooth[p.id], sw = swing[p.id];
